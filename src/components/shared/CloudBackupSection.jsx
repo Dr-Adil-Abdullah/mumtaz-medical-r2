@@ -9,8 +9,8 @@ import {
   downloadFromGoogleDrive, 
   deleteFromGoogleDrive, 
   authenticateGoogle, 
-  initializeGapiClient,
-  initializeGisClient
+  initializeGoogleAPIs,
+  isGoogleApiReady
 } from '../../utils/googleDriveBackup';
 
 export default function CloudBackupSection() {
@@ -20,25 +20,25 @@ export default function CloudBackupSection() {
   const [googleDriveBackups, setGoogleDriveBackups] = useState([]);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleApiReady, setGoogleApiReady] = useState(false);
+  const [initializing, setInitializing] = useState(true);
 
+  // Initialize Google APIs when component mounts
   useEffect(() => {
-    const checkAndInit = async () => {
+    const init = async () => {
       try {
-        if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-          await initializeGapiClient();
-          initializeGisClient();
-          setGoogleApiReady(true);
-        } else {
-          // Scripts not loaded yet, retry
-          setTimeout(checkAndInit, 500);
-        }
+        console.log('🔄 Initializing Google APIs...');
+        await initializeGoogleAPIs();
+        setGoogleApiReady(true);
+        console.log('✅ Google APIs ready');
       } catch (error) {
-        console.error('Google API init error:', error);
+        console.error('❌ Failed to initialize Google APIs:', error);
+        setBackupError(`Google API initialization failed: ${error.message}`);
+      } finally {
+        setInitializing(false);
       }
     };
-    // Start checking after 1 second
-    const timer = setTimeout(checkAndInit, 1000);
-    return () => clearTimeout(timer);
+
+    init();
   }, []);
 
   function flash(message, isError = false) {
@@ -92,16 +92,26 @@ export default function CloudBackupSection() {
 
   async function handleGoogleAuth() {
     try {
+      setBackupLoading(true);
+      setBackupError('');
+      
       if (!googleApiReady) {
-        flash('Google API still loading. Please wait 2-3 seconds and try again.', true);
+        flash('⏳ Google API is still initializing. Please wait...', true);
         return;
       }
+
+      console.log('🔐 Starting Google authentication...');
       await authenticateGoogle();
       setGoogleConnected(true);
       flash('✅ Connected to Google Drive!');
+      
+      console.log('📋 Loading backups...');
       await loadGoogleDriveBackups();
     } catch (error) {
-      flash(error.message, true);
+      console.error('❌ Authentication failed:', error);
+      flash(`Authentication failed: ${error.message}`, true);
+    } finally {
+      setBackupLoading(false);
     }
   }
 
@@ -208,20 +218,43 @@ export default function CloudBackupSection() {
           </Badge>
         </div>
 
-        {!googleConnected ? (
+        {initializing ? (
+          <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-4">
+            <div className="flex items-center gap-3">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+              <div>
+                <p className="text-sm font-medium text-blue-200">⏳ Initializing Google API...</p>
+                <p className="text-xs text-blue-300 mt-1">This may take a few seconds on first load</p>
+              </div>
+            </div>
+          </div>
+        ) : !googleApiReady ? (
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4">
+            <p className="text-sm text-amber-200 mb-2">⚠️ Google API failed to initialize</p>
+            <Button onClick={() => {
+              setInitializing(true);
+              setBackupError('');
+              initializeGoogleAPIs()
+                .then(() => {
+                  setGoogleApiReady(true);
+                  setInitializing(false);
+                })
+                .catch((error) => {
+                  setBackupError(`Initialization failed: ${error.message}`);
+                  setInitializing(false);
+                });
+            }} variant="secondary">
+              🔄 Retry
+            </Button>
+          </div>
+        ) : !googleConnected ? (
           <div className="space-y-3">
             <p className="text-sm text-slate-400">
               Connect your Google account to save backups to Google Drive.
             </p>
-            {!googleApiReady ? (
-              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-200">
-                ⏳ Google API is loading... Please wait a few seconds and refresh the page if this takes too long.
-              </div>
-            ) : (
-              <Button onClick={handleGoogleAuth} disabled={backupLoading}>
-                🔐 Connect Google Drive
-              </Button>
-            )}
+            <Button onClick={handleGoogleAuth} disabled={backupLoading}>
+              🔐 Connect Google Drive
+            </Button>
           </div>
         ) : (
           <>
